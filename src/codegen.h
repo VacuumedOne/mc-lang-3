@@ -71,25 +71,44 @@ Value *BinaryAST::codegen() {
     if (!L || !R)
         return nullptr;
 
-    switch (Op) {
-        case '+':
-            // LLVM IR Builerを使い、この二項演算のIRを作る
-            return Builder.CreateAdd(L, R, "addtmp");
-            // TODO 1.7: '-'と'*'に対してIRを作ってみよう
-            // 上の行とhttps://llvm.org/doxygen/classllvm_1_1IRBuilder.htmlを参考のこと
-        case '-':
-            return Builder.CreateSub(L, R, "subtmp");
-        case '*':
-            return Builder.CreateMul(L, R, "multmp");
+    if (Op == "+") {
+        // LLVM IR Builerを使い、この二項演算のIRを作る
+        return Builder.CreateAdd(L, R, "add");
+        // TODO 1.7: '-'と'*'に対してIRを作ってみよう
+        // 上の行とhttps://llvm.org/doxygen/classllvm_1_1IRBuilder.htmlを参考のこと
+    } else if (Op == "-") {
+        return Builder.CreateSub(L, R, "sub");
+    } else if (Op == "*") {
+        return Builder.CreateMul(L, R, "mul");
+    } else if (Op == "<") {
+        Value *v = Builder.CreateICmp(CmpInst::ICMP_SLT, L, R, "less than");
+        return Builder.CreateIntCast(v, Type::getInt64Ty(Context), false, "cast from i1 to i64");
+    } else if (Op == ">") {
+        Value *v = Builder.CreateICmp(CmpInst::ICMP_SGT, L, R, "greater than");
+        return Builder.CreateIntCast(v, Type::getInt64Ty(Context), false, "cast from i1 to i64");
+    } else if (Op == "<=") {
+        Value *v = Builder.CreateICmp(CmpInst::ICMP_SLE, L, R, "equal or less than");
+        return Builder.CreateIntCast(v, Type::getInt64Ty(Context), false, "cast from i1 to i64");
+    } else if (Op == ">=") {
+        Value *v = Builder.CreateICmp(CmpInst::ICMP_SGE, L, R, "equal or greater than");
+        return Builder.CreateIntCast(v, Type::getInt64Ty(Context), false, "cast from i1 to i64");
+    } else if (Op == "==") {
+        Value *v = Builder.CreateICmp(CmpInst::ICMP_EQ, L, R, "equal");
+        return Builder.CreateIntCast(v, Type::getInt64Ty(Context), false, "cast from i1 to i64");
+    } else if (Op == "!=") {
+        Value *v = Builder.CreateICmp(CmpInst::ICMP_NE, L, R, "not equal");
+        return Builder.CreateIntCast(v, Type::getInt64Ty(Context), false, "cast from i1 to i64");
+    } else {
+        return LogErrorV("invalid binary operator");
+    }
+        
         // TODO 3.1: '<'を実装してみよう
         // '<'のcodegenを実装して下さい。その際、以下のIRBuilderのメソッドが使えます。
         // CreateICmp: https://llvm.org/doxygen/classllvm_1_1IRBuilder.html#a103d309fa238e186311cbeb961b5bcf4
         // llvm::CmpInst::ICMP_SLT: https://llvm.org/doxygen/classllvm_1_1CmpInst.html#a283f9a5d4d843d20c40bb4d3e364bb05
         // CreateIntCast: https://llvm.org/doxygen/classllvm_1_1IRBuilder.html#a5bb25de40672dedc0d65e608e4b78e2f
         // CreateICmpの返り値がi1(1bit)なので、CreateIntCastはそれをint64にcastするのに用います。
-        default:
-            return LogErrorV("invalid binary operator");
-    }
+
 }
 
 Function *PrototypeAST::codegen() {

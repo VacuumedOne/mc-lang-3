@@ -15,7 +15,18 @@ enum Token {
     tok_number = -4,
     tok_if = -5,
     tok_then = -6,
-    tok_else = -7
+    tok_else = -7,
+    tok_op = -8
+};
+
+std::set<char> op_char{
+    '>',
+    '<',
+    '=',
+    '+',
+    '-',
+    '*',
+    '!'
 };
 
 class Lexer {
@@ -93,6 +104,19 @@ class Lexer {
             // EOFならtok_eofを返す
             if (iFile.eof())
                 return tok_eof;
+            
+            // 演算子ならtok_opを返す
+            if (op_char.count(lastChar) > 0) {
+                std::string op = "";
+                op += lastChar;
+                lastChar = getNextChar(iFile);
+                while(op_char.count(lastChar) > 0) {
+                    op += lastChar;
+                    lastChar = getNextChar(iFile);
+                }
+                setOperand(op);
+                return tok_op;
+            }
 
             // tok_numberでもtok_eofでもなければそのcharのasciiを返す
             int thisChar = lastChar;
@@ -108,13 +132,17 @@ class Lexer {
         std::string getIdentifier() { return identifierStr; }
         void setIdentifier(std::string str) { identifierStr = str; }
 
+        // 演算子を格納するoperandStrのgetter, setter
+        std::string getOperand() { return operandStr; }
+        void setOperand(std::string str) { operandStr = str; } 
+
         void initStream(std::string fileName) { iFile.open(fileName); }
 
             private:
         std::ifstream iFile;
         uint64_t numVal;
-        // tok_identifierなら文字を入れる
         std::string identifierStr;
+        std::string operandStr;
         static char getNextChar(std::ifstream &is) {
             char c = '\0';
             if (is.good())

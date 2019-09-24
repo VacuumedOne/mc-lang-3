@@ -28,11 +28,11 @@ namespace {
 
     // BinaryAST - `+`や`*`等の二項演算子を表すクラス
     class BinaryAST : public ExprAST {
-        char Op;
+        std::string Op;
         std::unique_ptr<ExprAST> LHS, RHS;
 
         public:
-        BinaryAST(char Op, std::unique_ptr<ExprAST> LHS,
+        BinaryAST(std::string Op, std::unique_ptr<ExprAST> LHS,
                 std::unique_ptr<ExprAST> RHS)
             : Op(Op), LHS(std::move(LHS)), RHS(std::move(RHS)) {}
 
@@ -113,15 +113,18 @@ static int CurTok;
 static int getNextToken() { return CurTok = lexer.gettok(); }
 
 // 二項演算子の結合子をmc.cppで定義している。
-static std::map<char, int> BinopPrecedence;
+static std::map<std::string, int> BinopPrecedence;
 
 // GetTokPrecedence - 二項演算子の結合度を取得
 // もし現在のトークンが二項演算子ならその結合度を返し、そうでないなら-1を返す。
 static int GetTokPrecedence() {
-    if (!isascii(CurTok))
+    if (CurTok != tok_op)
+        return -1;
+    std::string op = lexer.getOperand();
+    if (BinopPrecedence.count(op) == 0) 
         return -1;
 
-    int tokprec = BinopPrecedence[CurTok];
+    int tokprec = BinopPrecedence[op];
     if (tokprec <= 0)
         return -1;
     return tokprec;
@@ -276,7 +279,7 @@ static std::unique_ptr<ExprAST> ParseBinOpRHS(int CallerPrec,
             return LHS;
 
         // 3. 二項演算子をセットする。e.g. int BinOp = CurTok;
-        int BinOp = CurTok;
+        std::string BinOp = lexer.getOperand();
 
         // 4. 次のトークン(二項演算子の右のexpression)に進む。
         getNextToken();
