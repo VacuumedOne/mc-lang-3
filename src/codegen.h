@@ -81,23 +81,23 @@ Value *BinaryAST::codegen() {
     } else if (Op == "*") {
         return Builder.CreateMul(L, R, "mul");
     } else if (Op == "<") {
-        Value *v = Builder.CreateICmp(CmpInst::ICMP_SLT, L, R, "less than");
-        return Builder.CreateIntCast(v, Type::getInt64Ty(Context), false, "cast from i1 to i64");
+        Value *v = Builder.CreateICmp(CmpInst::ICMP_SLT, L, R, "slt");
+        return Builder.CreateIntCast(v, Type::getInt64Ty(Context), false, "cast_i1_to_i64");
     } else if (Op == ">") {
-        Value *v = Builder.CreateICmp(CmpInst::ICMP_SGT, L, R, "greater than");
-        return Builder.CreateIntCast(v, Type::getInt64Ty(Context), false, "cast from i1 to i64");
+        Value *v = Builder.CreateICmp(CmpInst::ICMP_SGT, L, R, "sgt");
+        return Builder.CreateIntCast(v, Type::getInt64Ty(Context), false, "cast_i1_to_i64");
     } else if (Op == "<=") {
-        Value *v = Builder.CreateICmp(CmpInst::ICMP_SLE, L, R, "equal or less than");
-        return Builder.CreateIntCast(v, Type::getInt64Ty(Context), false, "cast from i1 to i64");
+        Value *v = Builder.CreateICmp(CmpInst::ICMP_SLE, L, R, "sle");
+        return Builder.CreateIntCast(v, Type::getInt64Ty(Context), false, "cast_i1_to_i64");
     } else if (Op == ">=") {
-        Value *v = Builder.CreateICmp(CmpInst::ICMP_SGE, L, R, "equal or greater than");
-        return Builder.CreateIntCast(v, Type::getInt64Ty(Context), false, "cast from i1 to i64");
+        Value *v = Builder.CreateICmp(CmpInst::ICMP_SGE, L, R, "sge");
+        return Builder.CreateIntCast(v, Type::getInt64Ty(Context), false, "cast_i1_to_i64");
     } else if (Op == "==") {
-        Value *v = Builder.CreateICmp(CmpInst::ICMP_EQ, L, R, "equal");
-        return Builder.CreateIntCast(v, Type::getInt64Ty(Context), false, "cast from i1 to i64");
+        Value *v = Builder.CreateICmp(CmpInst::ICMP_EQ, L, R, "eq");
+        return Builder.CreateIntCast(v, Type::getInt64Ty(Context), false, "cast_i1_to_i64");
     } else if (Op == "!=") {
-        Value *v = Builder.CreateICmp(CmpInst::ICMP_NE, L, R, "not equal");
-        return Builder.CreateIntCast(v, Type::getInt64Ty(Context), false, "cast from i1 to i64");
+        Value *v = Builder.CreateICmp(CmpInst::ICMP_NE, L, R, "ne");
+        return Builder.CreateIntCast(v, Type::getInt64Ty(Context), false, "cast_i1_to_i64");
     } else {
         return LogErrorV("invalid binary operator");
     }
@@ -205,6 +205,14 @@ Value *IfExprAST::codegen() {
     // "then"ブロックを参考に、"else"ブロックのcodegenを実装して下さい。
     // 注意: 20行下のコメントアウトを外して下さい。
     ParentFunc->getBasicBlockList().push_back(ElseBB);
+    Builder.SetInsertPoint(ElseBB);
+    Value *ElseV = Else->codegen();
+    if (!ElseV)
+        // LogError("Fail to get else value");
+        return nullptr;
+    Builder.CreateBr(MergeBB);
+    ElseBB = Builder.GetInsertBlock();
+
 
     // "ifcont"ブロックのcodegen
     ParentFunc->getBasicBlockList().push_back(MergeBB);
@@ -221,7 +229,8 @@ Value *IfExprAST::codegen() {
 
     PN->addIncoming(ThenV, ThenBB);
     // TODO 3.4:を実装したらコメントアウトを外して下さい。
-    // PN->addIncoming(ElseV, ElseBB);
+    PN->addIncoming(ElseV, ElseBB);
+
     return PN;
 }
 

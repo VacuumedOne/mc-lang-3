@@ -226,24 +226,46 @@ static std::unique_ptr<ExprAST> ParseIdentifierExpr() {
 }
 
 static std::unique_ptr<ExprAST> ParseIfExpr() {
-    return nullptr;
+    // return nullptr;
     // TODO 3.3: If文のパーシングを実装してみよう。
     // 1. ParseIfExprに来るということは現在のトークンが"if"なので、
     // トークンを次に進めます。
+    getNextToken();
 
     // 2. ifの次はbranching conditionを表すexpressionがある筈なので、
     // ParseExpressionを呼んでconditionをパースします。
+    auto cond = ParseExpression();
+    if (!cond) {
+        return LogError("illegal condition expression after 'if'");
+    }
 
     // 3. "if x < 4 then .."のような文の場合、今のトークンは"then"である筈なので
     // それをチェックし、トークンを次に進めます。
+    if (CurTok != tok_then) {
+        return LogError("no 'then' after 'if'.");
+    }
+    getNextToken();
 
     // 4. "then"ブロックのexpressionをParseExpressionを呼んでパースします。
+    auto expr1 = ParseExpression();
+    if (!expr1) {
+        return LogError("no expression after 'if .. then'");
+    }
 
     // 5. 3と同様、今のトークンは"else"である筈なのでチェックし、トークンを次に進めます。
+    if (CurTok != tok_else) {
+        return LogError("no 'else' after 'then ..'");
+    }
+    getNextToken();
 
     // 6. "else"ブロックのexpressionをParseExpressionを呼んでパースします。
-
+    auto expr2 = ParseExpression();
+    if (!expr2) {
+        return LogError("no expression after 'else'");
+    }
     // 7. IfExprASTを作り、returnします。
+    return llvm::make_unique<IfExprAST>(std::move(cond), std::move(expr1), std::move(expr2));
+
 }
 
 // ParsePrimary - NumberASTか括弧をパースする関数
