@@ -14,17 +14,58 @@ static IRBuilder<> Builder(Context);
 // https://llvm.org/doxygen/classllvm_1_1Module.html
 // このModuleはC++ Moduleとは何の関係もなく、LLVM IRを格納するトップレベルオブジェクトです。
 static std::unique_ptr<Module> myModule;
+
+struct VariableTuple {
+    Value *value;
+    NumType type;
+};
 // 変数名とllvm::Valueのマップを保持する
-static std::map<std::string, Value *> NamedValues;
+static std::map<std::string, VariableTuple> NamedValues;
+
+Type *cvtNumTypeToType(NumType nt) {
+    Type *t;
+    if (nt == INT) {
+        t = Type::getInt64Ty(Context);
+    } else if (nt == DOUBLE) {
+        t = Type::getDoubleTy(Context);
+    } else {
+        LogError("type not found");
+        t = nullptr;
+    }
+    return t;
+}
+
+NumType cvtTypeToNumType(Type *t) {
+    NumType nt;
+    if (t == Type::getInt64Ty(Context)) {
+        nt = INT;
+    } else if (t == Type::getDoubleTy(Context)) {
+        nt = DOUBLE;
+    } else {
+        LogError("typenum not found");
+        nt = DEFAULT;
+    }
+    return nt;
+}
+
 
 // https://llvm.org/doxygen/classllvm_1_1Value.html
 // llvm::Valueという、LLVM IRのオブジェクトでありFunctionやModuleなどを構成するクラスを使います
 Value *NumberAST::codegen() {
     // 64bit整数型のValueを返す
-    return ConstantFP::get(Context, APFloat(Val));
+    if (type == INT) {
+        return ConstantInt::get(Context, APInt(64, intVal, true));
+    } else {
+        return ConstantFP::get(Context, APFloat(doubleVal));
+    }
 }
 
 Value *LogErrorV(const char *str) {
+    LogError(str);
+    return nullptr;
+}
+
+Function *LogErrorF(const char *str) {
     LogError(str);
     return nullptr;
 }
@@ -33,10 +74,22 @@ Value *LogErrorV(const char *str) {
 Value *VariableExprAST::codegen() {
     // NamedValuesの中にVariableExprAST::NameとマッチするValueがあるかチェックし、
     // あったらそのValueを返す。
-    Value *V = NamedValues[variableName];
-    if (!V)
+    if (NamedValues.count(variableName) > 0) {
+        VariableTuple vt = NamedValues[variableName];
+        return vt.value;
+    } else {
         return LogErrorV("Unknown variable name");
-    return V;
+    }
+}
+
+NumType VariableExprAST::checkType() {
+    if (NamedValues.count(variableName) > 0) {
+        VariableTuple vt = NamedValues[variableName];
+        return vt.type;
+    } else {
+        LogError("Unknown variable name");
+        return DEFAULT;
+    }
 }
 
 // TODO 2.5: 関数呼び出しのcodegenを実装してみよう
@@ -49,13 +102,15 @@ Value *CallExprAST::codegen() {
 
     // 2. llvm::Function::arg_sizeと実際に渡されたargsのサイズを比べ、
     // サイズが間違っていたらエラーを出力。
-    if (CalleeF->arg_size() != args.size())
+    //ここのチェックはもっと厳しくできる
+    int i = 0;
+    if (CalleeF->arg_size() != ArgList.size())
         return LogErrorV("Incorrect # arguments passed");
 
     std::vector<Value *> argsV;
     // 3. argsをそれぞれcodegenしllvm::Valueにし、argsVにpush_backする。
-    for (unsigned i = 0, e = args.size(); i != e; ++i) {
-        argsV.push_back(args[i]->codegen());
+    for (unsigned i = 0, e = ArgList.size(); i != e; ++i) {
+        argsV.push_back(ArgList[i]->codegen());
         if (!argsV.back())
             return nullptr;
     }
@@ -64,44 +119,98 @@ Value *CallExprAST::codegen() {
     return Builder.CreateCall(CalleeF, argsV, "calltmp");
 }
 
+NumType CallExprAST::checkType() {
+    Function *CalleeF = myModule->getFunction(callee);
+    if (!CalleeF)
+        LogError("Unknown function referenced");
+        return DEFAULT;
+    Type *retType = CalleeF->getReturnType();
+    return cvtTypeToNumType(retType);
+}
+
 Value *BinaryAST::codegen() {
     // 二項演算子の両方の引数をllvm::Valueにする。
+    NumType type = checkType();
+
+    NumType typeL = LHS->checkType();
     Value *L = LHS->codegen();
+
+    NumType typeR = RHS->checkType();
     Value *R = RHS->codegen();
+
     if (!L || !R)
         return nullptr;
+    
+    //左右がIntとDoubleで食い違っている場合、Int側にキャストを施す
+    if (typeL == INT && type == DOUBLE) {
+        L = Builder.CreateFPCast(L, Type::getDoubleTy(Context), "cast_int_to_double");
+    }
+    if (typeR == INT && type == DOUBLE) {
+        R = Builder.CreateFPCast(R, Type::getDoubleTy(Context), "cast_int_to_double");
+    }
 
-    if (Op == "+") {
-        // LLVM IR Builerを使い、この二項演算のIRを作る
-        return Builder.CreateFAdd(L, R, "float_add");
-        // TODO 1.7: '-'と'*'に対してIRを作ってみよう
-        // 上の行とhttps://llvm.org/doxygen/classllvm_1_1IRBuilder.htmlを参考のこと
-    } else if (Op == "-") {
-        return Builder.CreateFSub(L, R, "float_sub");
-    } else if (Op == "*") {
-        return Builder.CreateFMul(L, R, "float_mul");
-    } else if (Op == "/") {
-        return Builder.CreateFDiv(L, R, "float_div");
-    } else if (Op == "<") {
-        L = Builder.CreateFCmpULT(L, R, "float_less_than");
-        return Builder.CreateUIToFP(L, Type::getDoubleTy(Context), "bool_to_double");
-    } else if (Op == ">") {
-        L = Builder.CreateFCmpUGT(L, R, "float_greater_than");
-        return Builder.CreateUIToFP(L, Type::getDoubleTy(Context), "bool_to_double");
-    } else if (Op == "<=") {
-        L = Builder.CreateFCmpULE(L, R, "float_equal_or_less_than");
-        return Builder.CreateUIToFP(L, Type::getDoubleTy(Context), "bool_to_double");
-    } else if (Op == ">=") {
-        L = Builder.CreateFCmpUGE(L, R, "float_equal_or_greater_than");
-        return Builder.CreateUIToFP(L, Type::getDoubleTy(Context), "bool_to_double");
-    } else if (Op == "==") {
-        L = Builder.CreateFCmpUEQ(L, R, "float_equal");
-        return Builder.CreateUIToFP(L, Type::getDoubleTy(Context), "bool_to_double");
-    } else if (Op == "!=") {
-        L = Builder.CreateFCmpUNE(L, R, "float_not_equal");
-        return Builder.CreateUIToFP(L, Type::getDoubleTy(Context), "bool_to_double");
+    if (type == DOUBLE) {
+        if (Op == "+") {
+            return Builder.CreateFAdd(L, R, "double_add");
+        } else if (Op == "-") {
+            return Builder.CreateFSub(L, R, "double_sub");
+        } else if (Op == "*") {
+            return Builder.CreateFMul(L, R, "double_mul");
+        } else if (Op == "/") {
+            return Builder.CreateFDiv(L, R, "double_div");
+        } else if (Op == "<") {
+            L = Builder.CreateFCmpULT(L, R, "double_less_than");
+            return Builder.CreateUIToFP(L, Type::getDoubleTy(Context), "bool_to_double");
+        } else if (Op == ">") {
+            L = Builder.CreateFCmpUGT(L, R, "double_greater_than");
+            return Builder.CreateUIToFP(L, Type::getDoubleTy(Context), "bool_to_double");
+        } else if (Op == "<=") {
+            L = Builder.CreateFCmpULE(L, R, "double_equal_or_less_than");
+            return Builder.CreateUIToFP(L, Type::getDoubleTy(Context), "bool_to_double");
+        } else if (Op == ">=") {
+            L = Builder.CreateFCmpUGE(L, R, "double_equal_or_greater_than");
+            return Builder.CreateUIToFP(L, Type::getDoubleTy(Context), "bool_to_double");
+        } else if (Op == "==") {
+            L = Builder.CreateFCmpUEQ(L, R, "double_equal");
+            return Builder.CreateUIToFP(L, Type::getDoubleTy(Context), "bool_to_double");
+        } else if (Op == "!=") {
+            L = Builder.CreateFCmpUNE(L, R, "double_not_equal");
+            return Builder.CreateUIToFP(L, Type::getDoubleTy(Context), "bool_to_double");
+        } else {
+            return LogErrorV("invalid binary operator");
+        }
+    } else if (type == INT) {
+        if (Op == "+") {
+            return Builder.CreateAdd(L, R, "int_add");
+        } else if (Op == "-") {
+            return Builder.CreateSub(L, R, "int_sub");
+        } else if (Op == "*") {
+            return Builder.CreateMul(L, R, "int_mul");
+        } else if (Op == "/") {
+            return Builder.CreateSDiv(L, R, "int_div");
+        } else if (Op == "<") {
+            L = Builder.CreateICmpULT(L, R, "int_less_than");
+            return Builder.CreateIntCast(L, Type::getInt64Ty(Context), true,  "bool_to_int");
+        } else if (Op == ">") {
+            L = Builder.CreateICmpUGT(L, R, "int_greater_than");
+            return Builder.CreateIntCast(L, Type::getInt64Ty(Context), true,  "bool_to_int");
+        } else if (Op == "<=") {
+            L = Builder.CreateICmpULE(L, R, "int_equal_or_less_than");
+            return Builder.CreateIntCast(L, Type::getInt64Ty(Context), true,  "bool_to_int");
+        } else if (Op == ">=") {
+            L = Builder.CreateICmpUGE(L, R, "int_equal_or_greater_than");
+            return Builder.CreateIntCast(L, Type::getInt64Ty(Context), true,  "bool_to_int");
+        } else if (Op == "==") {
+            L = Builder.CreateICmpEQ(L, R, "int_equal");
+            return Builder.CreateIntCast(L, Type::getInt64Ty(Context), true,  "bool_to_int");
+        } else if (Op == "!=") {
+            L = Builder.CreateICmpNE(L, R, "int_not_equal");
+            return Builder.CreateIntCast(L, Type::getInt64Ty(Context), true,  "bool_to_int");
+        } else {
+            return LogErrorV("invalid binary operator");
+        }
     } else {
-        return LogErrorV("invalid binary operator");
+        return LogErrorV("invalid type of return value");
     }
         
         // TODO 3.1: '<'を実装してみよう
@@ -110,14 +219,19 @@ Value *BinaryAST::codegen() {
         // llvm::CmpInst::ICMP_SLT: https://llvm.org/doxygen/classllvm_1_1CmpInst.html#a283f9a5d4d843d20c40bb4d3e364bb05
         // CreateIntCast: https://llvm.org/doxygen/classllvm_1_1IRBuilder.html#a5bb25de40672dedc0d65e608e4b78e2f
         // CreateICmpの返り値がi1(1bit)なので、CreateIntCastはそれをint64にcastするのに用います。
-
 }
 
 Function *PrototypeAST::codegen() {
-    // MC言語では変数の型も関数の返り値もdoubleの為、関数の返り値をdoubleにする。
-    std::vector<Type *> prototype(args.size(), Type::getDoubleTy(Context));
+    Type *retType = cvtNumTypeToType(type);
+
+    std::vector<Type *> prototype;
+    for (ArgTuple arg : ArgList) {
+        NumType argNumType = arg.type;
+        Type *argType = cvtNumTypeToType(arg.type);
+        prototype.push_back(argType);
+    }
     FunctionType *FT =
-        FunctionType::get(Type::getDoubleTy(Context), prototype, false);
+        FunctionType::get(retType, prototype, false);
     // https://llvm.org/doxygen/classllvm_1_1Function.html
     // llvm::Functionは関数のIRを表現するクラス
     Function *F =
@@ -125,9 +239,13 @@ Function *PrototypeAST::codegen() {
 
     // 引数の名前を付ける
     unsigned i = 0;
-    for (auto &Arg : F->args())
-        Arg.setName(args[i++]);
-
+    NamedValues.clear();
+    for (auto &arg : F->args()) {
+        arg.setName(ArgList[i].name);
+        VariableTuple vp = {&arg, ArgList[i].type};
+        NamedValues[ArgList[i].name] = vp;
+        i++;
+    }
     return F;
 }
 
@@ -145,9 +263,13 @@ Function *FunctionAST::codegen() {
     Builder.SetInsertPoint(BB);
 
     // Record the function arguments in the NamedValues map.
-    NamedValues.clear();
-    for (auto &Arg : function->args())
-        NamedValues[Arg.getName()] = &Arg;
+    // NamedValues.clear();
+    // int i = 0;
+    // for (auto arg : function->args()) {
+        
+        
+    //     NamedValues[arg.getName()] = &Arg;
+    // }
 
     // 関数のbody(ExprASTから継承されたNumberASTかBinaryAST)をcodegenする
     if (Value *RetVal = body->codegen()) {
@@ -167,18 +289,17 @@ Function *FunctionAST::codegen() {
 }
 
 Value *IfExprAST::codegen() {
-    // if x < 5 then x + 3 else x - 5;
-    // というコードが入力だと考える。
-    // Cond->codegen()によって"x < 5"のcondition部分がcodegenされ、その返り値(int)が
-    // CondVに格納される。
+    NumType type = Cond->checkType();
     Value *CondV = Cond->codegen();
     if (!CondV)
         return nullptr;
-
-    // CondVはint64でtrueなら0以外、falseなら0が入っているため、CreateICmpNEを用いて
-    // CondVが0(false)とnot-equalかどうか判定し、CondVをbool型にする。
-    CondV = Builder.CreateFCmpUNE(
-            CondV, ConstantFP::get(Context, APFloat(0.0)), "ifcond");
+    if (type == INT) {
+        CondV = Builder.CreateICmpNE(CondV, ConstantInt::get(Context, APInt(64, 0)), "if_condition");
+    } else if (type == DOUBLE) {
+        CondV = Builder.CreateFCmpUNE(CondV, ConstantFP::get(Context, APFloat(0.0)), "if_condition");
+    } else {
+        return LogErrorV("illegal type of condition");
+    }
     // if文を呼んでいる関数の名前
     Function *ParentFunc = Builder.GetInsertBlock()->getParent();
 
@@ -195,9 +316,13 @@ Value *IfExprAST::codegen() {
 
     // "then"のブロックを作り、その内容(expression)をcodegenする。
     Builder.SetInsertPoint(ThenBB);
+    NumType typeT = Then->checkType();
     Value *ThenV = Then->codegen();
     if (!ThenV)
         return nullptr;
+    if (typeT == INT && type == DOUBLE) {
+        ThenV = Builder.CreateFPCast(ThenV, Type::getDoubleTy(Context), "cast_int_to_double");
+    }
     // "then"のブロックから出る時は"ifcont"ブロックに飛ぶ。
     Builder.CreateBr(MergeBB);
     // ThenBBをアップデートする。
@@ -208,10 +333,13 @@ Value *IfExprAST::codegen() {
     // 注意: 20行下のコメントアウトを外して下さい。
     ParentFunc->getBasicBlockList().push_back(ElseBB);
     Builder.SetInsertPoint(ElseBB);
+    NumType typeE = Else->checkType();
     Value *ElseV = Else->codegen();
     if (!ElseV)
-        // LogError("Fail to get else value");
         return nullptr;
+    if (typeE == INT && type == DOUBLE) {
+        ElseV = Builder.CreateFPCast(ElseV, Type::getDoubleTy(Context), "cast_int_to_double");
+    }
     Builder.CreateBr(MergeBB);
     ElseBB = Builder.GetInsertBlock();
 
@@ -232,7 +360,7 @@ Value *IfExprAST::codegen() {
     PN->addIncoming(ThenV, ThenBB);
     // TODO 3.4:を実装したらコメントアウトを外して下さい。
     PN->addIncoming(ElseV, ElseBB);
-
+ 
     return PN;
 }
 

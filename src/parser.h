@@ -7,6 +7,26 @@
 // 全てのコードを無事にASTとして表現できたら、後述するcodegenを再帰的に呼び出す事に
 // よりオブジェクトファイルを生成する。
 //===----------------------------------------------------------------------===//
+enum NumType {
+    DEFAULT = -1, //codegenの段階でNumTypeが確定する。これはそれより前の仮の状態。
+    INT = 0,
+    DOUBLE = 1
+};
+
+NumType returnType(NumType type1, NumType type2) {
+    if (type1 == DEFAULT || type2 == DEFAULT) {
+        return DEFAULT;
+    } else if (type1 == type2) {
+        return type1;
+    } else {
+        return DOUBLE;
+    }
+}
+
+struct ArgTuple {
+    std::string name;
+    NumType type;
+};
 
 namespace {
     // ExprAST - `5+2`や`2*10-2`等のexpressionを表すクラス
@@ -14,15 +34,28 @@ namespace {
         public:
             virtual ~ExprAST() = default;
             virtual Value *codegen() = 0;
+            NumType type = DEFAULT;
+            virtual NumType checkType() {return DEFAULT;}
     };
 
     // NumberAST - `5`や`2`等の数値リテラルを表すクラス
     class NumberAST : public ExprAST {
         // 実際に数値の値を保持する変数
-        double Val;
+        int intVal;
+        double doubleVal;
 
         public:
-        NumberAST(double Val) : Val(Val) {}
+        NumberAST(double Val) {
+            type = DOUBLE;
+            doubleVal = Val;
+        }
+        NumberAST(int Val) {
+            type = INT;
+            intVal = Val;
+        }
+        NumType checkType() override {
+            return type;
+        }
         Value *codegen() override;
     };
 
@@ -35,7 +68,9 @@ namespace {
         BinaryAST(std::string Op, std::unique_ptr<ExprAST> LHS,
                 std::unique_ptr<ExprAST> RHS)
             : Op(Op), LHS(std::move(LHS)), RHS(std::move(RHS)) {}
-
+        NumType checkType() override {
+            return returnType(LHS->checkType(), RHS->checkType());
+        }
         Value *codegen() override;
     };
 
@@ -45,30 +80,33 @@ namespace {
 
         public:
         VariableExprAST(const std::string &variableName) : variableName(variableName) {}
+        NumType checkType() override;
         Value *codegen() override;
     };
 
     // CallExprAST - 関数呼び出しを表すクラス
     class CallExprAST : public ExprAST {
         std::string callee;
-        std::vector<std::unique_ptr<ExprAST>> args;
+        std::vector<std::unique_ptr<ExprAST>> ArgList;
 
         public:
         CallExprAST(const std::string &callee,
-                std::vector<std::unique_ptr<ExprAST>> args)
-            : callee(callee), args(std::move(args)) {}
+                std::vector<std::unique_ptr<ExprAST>> ArgList)
+            : callee(callee), ArgList(std::move(ArgList)) {}
 
+        NumType checkType() override;
         Value *codegen() override;
     };
 
     // PrototypeAST - 関数シグネチャーのクラスで、関数の名前と引数の名前を表すクラス
     class PrototypeAST {
         std::string Name;
-        std::vector<std::string> args;
+        std::vector<ArgTuple> ArgList;
+        NumType type;
 
         public:
-        PrototypeAST(const std::string &Name, std::vector<std::string> args)
-            : Name(Name), args(std::move(args)) {}
+        PrototypeAST(const std::string &Name, std::vector<ArgTuple> ArgList, NumType type)
+            : Name(Name), ArgList(std::move(ArgList)), type(type) {}
 
         Function *codegen();
         const std::string &getFunctionName() const { return Name; }
@@ -90,12 +128,16 @@ namespace {
 
     class IfExprAST : public ExprAST {
         std::unique_ptr<ExprAST> Cond, Then, Else;
+        NumType type;
 
         public:
         IfExprAST(std::unique_ptr<ExprAST> Cond, std::unique_ptr<ExprAST> Then,
                 std::unique_ptr<ExprAST> Else)
             : Cond(std::move(Cond)), Then(std::move(Then)), Else(std::move(Else)) {}
 
+        NumType checkType() override {
+            return returnType(Then->checkType(), Else->checkType());
+        }
         Value *codegen() override;
     };
 } // end anonymous namespace
@@ -147,9 +189,17 @@ static std::unique_ptr<ExprAST> ParseExpression();
 // 数値リテラルをパースする関数。
 static std::unique_ptr<ExprAST> ParseNumberExpr() {
     // NumberASTのValにlexerからnumValを読んできて、セットする。
-    auto Result = llvm::make_unique<NumberAST>(lexer.getNumVal());
-    getNextToken(); // トークンを一個進めて、returnする。
-    return std::move(Result);
+    if (CurTok == tok_int_number) {
+        auto Result = llvm::make_unique<NumberAST>((int)lexer.getIntVal());
+        getNextToken(); // トークンを一個進めて、returnする。
+        return std::move(Result);
+    } else if (CurTok == tok_double_number){
+        auto Result = llvm::make_unique<NumberAST>((double)lexer.getDoubleVal());
+        getNextToken(); // トークンを一個進めて、returnする。
+        return std::move(Result);
+    } else {
+        return LogError("This is NaN");
+    }
 }
 
 // TODO 1.5: 括弧を実装してみよう
@@ -204,8 +254,8 @@ static std::unique_ptr<ExprAST> ParseIdentifierExpr() {
     std::vector<std::unique_ptr<ExprAST>> args;
     if (CurTok != ')') {
         while (true) {
-            if (auto Arg = ParseExpression())
-                args.push_back(std::move(Arg));
+            if (auto val = ParseExpression())
+                args.push_back(std::move(val));
             else
                 return nullptr;
 
@@ -275,7 +325,8 @@ static std::unique_ptr<ExprAST> ParsePrimary() {
             return LogError("unknown token when expecting an expression");
         case tok_identifier:
             return ParseIdentifierExpr();
-        case tok_number:
+        case tok_int_number:
+        case tok_double_number:
             return ParseNumberExpr();
         case '(':
             return ParseParenExpr();
@@ -340,17 +391,43 @@ static std::unique_ptr<PrototypeAST> ParsePrototype() {
     if (CurTok != '(')
         return LogErrorP("Expected '(' in prototype");
 
-    std::vector<std::string> ArgNames;
-    while (getNextToken() == tok_identifier) {
-        std::string curArg = lexer.getIdentifier();
-        ArgNames.push_back(curArg);
+    std::vector<ArgTuple> ArgList;
+    while (getNextToken() != ')') {
+        if (CurTok == ',') {
+            getNextToken();
+        }
+        NumType type;
+        std::string name;
+        if (CurTok == tok_int) {
+            type = INT;
+        } else if (CurTok == tok_double) {
+            type = DOUBLE;
+        } else {
+            return LogErrorP("Expected type of argment");
+        }
+        if (getNextToken() == tok_identifier) {
+            name = lexer.getIdentifier();
+        }
+        ArgTuple curArg = {name, type};
+        ArgList.push_back(curArg);
     }
     if (CurTok != ')')
         return LogErrorP("Expected ')' in prototype");
-
+    getNextToken();
+    if (CurTok != ':')
+        return LogErrorP("Expected ':' in prototype");
+    getNextToken();
+    NumType retType;
+    if (CurTok == tok_int) {
+        retType = INT;
+    } else if (CurTok == tok_double) {
+        retType = DOUBLE;
+    } else {
+        return LogErrorP("Expected type of return value");
+    }
     getNextToken();
 
-    return llvm::make_unique<PrototypeAST>(FnName, std::move(ArgNames));
+    return llvm::make_unique<PrototypeAST>(FnName, std::move(ArgList), retType);
 }
 
 static std::unique_ptr<FunctionAST> ParseDefinition() {
@@ -379,7 +456,7 @@ static std::unique_ptr<ExprAST> ParseExpression() {
 static std::unique_ptr<FunctionAST> ParseTopLevelExpr() {
     if (auto E = ParseExpression()) {
         auto Proto = llvm::make_unique<PrototypeAST>("__anon_expr",
-                std::vector<std::string>());
+                std::vector<ArgTuple>(), INT);
         return llvm::make_unique<FunctionAST>(std::move(Proto), std::move(E));
     }
     return nullptr;

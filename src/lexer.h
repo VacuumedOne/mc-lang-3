@@ -12,12 +12,19 @@ enum Token {
     tok_eof = -1,
     tok_def = -2,
     tok_identifier = -3,
-    tok_number = -4,
-    tok_if = -5,
-    tok_then = -6,
-    tok_else = -7,
-    tok_op = -8
+    tok_int_number = -4,
+    tok_double_number = -5,
+    tok_if = -6,
+    tok_then = -7,
+    tok_else = -8,
+    tok_op = -9,
+    tok_int = -10,
+    tok_double = -11
 };
+
+bool isNumberTok(Token t) {
+    return (t == tok_int_number || t == tok_double_number);
+}
 
 std::set<char> op_char{
     '>',
@@ -30,7 +37,7 @@ std::set<char> op_char{
     '!'
 };
 
-class DoubleDFA {
+class NumberDFA {
     private:
     int state = 1; //初期状態0。状態は0から7まである
     std::string read_text = "";
@@ -109,6 +116,12 @@ class DoubleDFA {
         return false;
     }
     bool isAccepted() {
+        return (state == 3 || state == 4 || state == 7);
+    }
+    bool isInt() {
+        return state == 3;
+    }
+    bool isDouble() {
         return (state == 4 || state == 7);
     }
     double getValue() {
@@ -146,6 +159,10 @@ class Lexer {
                     return tok_then;
                 if (identifierStr == "else")
                     return tok_else;
+                if (identifierStr == "int")
+                    return tok_int;
+                if (identifierStr == "double")
+                    return tok_double;
                 // TODO 3.2: "if", "then", "else"をトークナイズしてみよう
                 // 上記の"def"の例を参考に、3つの予約語をトークナイズして下さい。
                 return tok_identifier;
@@ -170,16 +187,18 @@ class Lexer {
 
             //doubleのDFAを用いてdouble型数値をパースする
             if (isdigit(lastChar) || (lastChar=='.')) {
-                DoubleDFA dfa;
+                NumberDFA dfa;
                 while (dfa.read(lastChar)) { //読み込めなくなるまで読む
                     lastChar = getNextChar(iFile);
                 }
                 if (dfa.isAccepted()) { //受理状態か確認
-                    setnumVal(dfa.getValue());
-                    return tok_number;
-                } else {
-                    setnumVal(-1.0);
-                    return tok_number;
+                    if (dfa.isDouble()) {
+                        setDoubleVal(dfa.getValue());
+                        return tok_double_number;
+                    } else {
+                        setIntVal((int)dfa.getValue());
+                        return tok_int_number;
+                    }
                 }
             }
 
@@ -225,8 +244,10 @@ class Lexer {
         }
 
         // 数字を格納するnumValのgetter, setter
-        double getNumVal() { return numVal; }
-        void setnumVal(double numval) { numVal = numval; }
+        double getIntVal() { return intVal; }
+        void setIntVal(int val) { intVal = val; }
+        double getDoubleVal() { return doubleVal; }
+        void setDoubleVal(double val) { doubleVal = val; }
 
         // 識別子を格納するIdentifierStrのgetter, setter
         std::string getIdentifier() { return identifierStr; }
@@ -238,9 +259,10 @@ class Lexer {
 
         void initStream(std::string fileName) { iFile.open(fileName); }
 
-            private:
+    private:
         std::ifstream iFile;
-        double numVal;
+        int intVal;
+        double doubleVal;
         std::string identifierStr;
         std::string operandStr;
         static char getNextChar(std::ifstream &is) {
@@ -250,4 +272,4 @@ class Lexer {
 
             return c;
         }
-        };
+};
