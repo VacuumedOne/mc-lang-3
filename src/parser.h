@@ -16,10 +16,10 @@ enum NumType {
 NumType returnType(NumType type1, NumType type2) {
     if (type1 == DEFAULT || type2 == DEFAULT) {
         return DEFAULT;
-    } else if (type1 == type2) {
-        return type1;
-    } else {
+    } else if (type1 == DOUBLE || type2 == DOUBLE) {
         return DOUBLE;
+    } else {
+        return INT;
     }
 }
 

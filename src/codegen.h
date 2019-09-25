@@ -100,19 +100,23 @@ Value *CallExprAST::codegen() {
     if (!CalleeF)
         return LogErrorV("Unknown function referenced");
 
-    // 2. llvm::Function::arg_sizeと実際に渡されたargsのサイズを比べ、
-    // サイズが間違っていたらエラーを出力。
-    //ここのチェックはもっと厳しくできる
     int i = 0;
-    if (CalleeF->arg_size() != ArgList.size())
-        return LogErrorV("Incorrect # arguments passed");
-
     std::vector<Value *> argsV;
     // 3. argsをそれぞれcodegenしllvm::Valueにし、argsVにpush_backする。
-    for (unsigned i = 0, e = ArgList.size(); i != e; ++i) {
-        argsV.push_back(ArgList[i]->codegen());
+    for (auto &arg : CalleeF->args()) {
+        Value *argV = ArgList[i]->codegen();
+
+        NumType defType = cvtTypeToNumType(arg.getType()); //関数で定義されている型
+        NumType argType = ArgList[i]->checkType(); //実際に呼び出しで指定された値の型
+        if (defType != argType) {
+            //型が一致しない場合
+            return LogErrorV("cannot assign the value to function");
+        }
+
+        argsV.push_back(argV);
         if (!argsV.back())
             return nullptr;
+        i++;
     }
 
     // 4. IRBuilderのCreateCallを呼び出し、Valueをreturnする。
@@ -120,10 +124,12 @@ Value *CallExprAST::codegen() {
 }
 
 NumType CallExprAST::checkType() {
+    LogError("callexprAST");
     Function *CalleeF = myModule->getFunction(callee);
-    if (!CalleeF)
+    if (!CalleeF) {
         LogError("Unknown function referenced");
         return DEFAULT;
+    }
     Type *retType = CalleeF->getReturnType();
     return cvtTypeToNumType(retType);
 }
@@ -141,11 +147,14 @@ Value *BinaryAST::codegen() {
     if (!L || !R)
         return nullptr;
     
-    //左右がIntとDoubleで食い違っている場合、Int側にキャストを施す
+    //左右がIntとDoubleで食い違っている場合、Int側にDoubleへのキャストを施す
+    //その予定だったけど、キャストがこれじゃダメらしいから断念。
     if (typeL == INT && type == DOUBLE) {
+        return LogErrorV("cannot operate between int and double");
         L = Builder.CreateFPCast(L, Type::getDoubleTy(Context), "cast_int_to_double");
     }
     if (typeR == INT && type == DOUBLE) {
+        return LogErrorV("cannot operate between double and int");
         R = Builder.CreateFPCast(R, Type::getDoubleTy(Context), "cast_int_to_double");
     }
 
@@ -261,15 +270,6 @@ Function *FunctionAST::codegen() {
     // エントリーポイントを作る
     BasicBlock *BB = BasicBlock::Create(Context, "entry", function);
     Builder.SetInsertPoint(BB);
-
-    // Record the function arguments in the NamedValues map.
-    // NamedValues.clear();
-    // int i = 0;
-    // for (auto arg : function->args()) {
-        
-        
-    //     NamedValues[arg.getName()] = &Arg;
-    // }
 
     // 関数のbody(ExprASTから継承されたNumberASTかBinaryAST)をcodegenする
     if (Value *RetVal = body->codegen()) {
