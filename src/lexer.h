@@ -26,7 +26,94 @@ std::set<char> op_char{
     '+',
     '-',
     '*',
+    '/',
     '!'
+};
+
+class DoubleDFA {
+    private:
+    int state = 1; //初期状態0。状態は0から7まである
+    std::string read_text = "";
+    bool isE(int c) {
+        return (c == 'E' || c == 'e');
+    }
+    bool isDot(int c) {
+        return c == '.';
+    }
+    bool isPlus(int c) {
+        return c == '+';
+    }
+    bool isMinus(int c) {
+        return c == '-';
+    }
+
+    public:
+    bool read(int c) { //一文字読んで遷移に成功したらtrue, 失敗したらfalse
+        read_text += (char)c;
+        switch(state) {
+            case 1:
+                if (isDot(c)) {
+                    state = 2;
+                    return true;
+                } else if (isdigit(c)) {
+                    state = 3;
+                    return true;
+                }
+                break;
+            case 2:
+                if (isdigit(c)) {
+                    state = 4;
+                    return true;
+                }
+                break;
+            case 3:
+                if (isDot(c)) {
+                    state = 4;
+                    return true;
+                } else if (isE(c)) {
+                    state = 5;
+                    return true;
+                } else if (isdigit(c)) {
+                    return true;
+                }
+                break;
+            case 4:
+                if (isE(c)) {
+                    state = 5;
+                    return true;
+                } else if (isdigit(c)) {
+                    return true;
+                }
+                break;
+            case 5:
+                if (isMinus(c) || isPlus(c)) {
+                    state = 6;
+                    return true;
+                } else if (isdigit(c)) {
+                    state = 7;
+                    return true;
+                }
+                break;
+            case 6:
+                if (isdigit(c)) {
+                    state = 7;
+                    return true;
+                }
+                break;
+            case 7:
+                if (isdigit(c)) {
+                    return true;
+                }
+                break;
+        }
+        return false;
+    }
+    bool isAccepted() {
+        return (state == 4 || state == 7);
+    }
+    double getValue() {
+        return strtod(read_text.c_str(), nullptr);
+    }
 };
 
 class Lexer {
@@ -80,13 +167,20 @@ class Lexer {
             // 7. このトークンは数値だったので、tok_numberをreturnする。
             //
             // ここに実装して下さい
-            if (isdigit(lastChar)) {
-                std::string numStr = "";
-                numStr += lastChar;
-                while (isdigit(lastChar = getNextChar(iFile)))
-                    numStr += lastChar;
-                setnumVal(strtod(numStr.c_str(), nullptr));
-                return tok_number;
+
+            //doubleのDFAを用いてdouble型数値をパースする
+            if (isdigit(lastChar) || (lastChar=='.')) {
+                DoubleDFA dfa;
+                while (dfa.read(lastChar)) { //読み込めなくなるまで読む
+                    lastChar = getNextChar(iFile);
+                }
+                if (dfa.isAccepted()) { //受理状態か確認
+                    setnumVal(dfa.getValue());
+                    return tok_number;
+                } else {
+                    setnumVal(-1.0);
+                    return tok_number;
+                }
             }
 
             // TODO 1.4: コメントアウトを実装してみよう
@@ -131,8 +225,8 @@ class Lexer {
         }
 
         // 数字を格納するnumValのgetter, setter
-        uint64_t getNumVal() { return numVal; }
-        void setnumVal(uint64_t numval) { numVal = numval; }
+        double getNumVal() { return numVal; }
+        void setnumVal(double numval) { numVal = numval; }
 
         // 識別子を格納するIdentifierStrのgetter, setter
         std::string getIdentifier() { return identifierStr; }
@@ -146,7 +240,7 @@ class Lexer {
 
             private:
         std::ifstream iFile;
-        uint64_t numVal;
+        double numVal;
         std::string identifierStr;
         std::string operandStr;
         static char getNextChar(std::ifstream &is) {

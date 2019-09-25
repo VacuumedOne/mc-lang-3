@@ -19,10 +19,10 @@ namespace {
     // NumberAST - `5`や`2`等の数値リテラルを表すクラス
     class NumberAST : public ExprAST {
         // 実際に数値の値を保持する変数
-        uint64_t Val;
+        double Val;
 
         public:
-        NumberAST(uint64_t Val) : Val(Val) {}
+        NumberAST(double Val) : Val(Val) {}
         Value *codegen() override;
     };
 

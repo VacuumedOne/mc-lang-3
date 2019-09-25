@@ -79,6 +79,7 @@ int main(int argc, char *argv[]) {
     BinopPrecedence["-"] = 30;
 
     BinopPrecedence["*"] = 40;
+    BinopPrecedence["/"] = 40;
 
     getNextToken();
 

@@ -21,7 +21,7 @@ static std::map<std::string, Value *> NamedValues;
 // llvm::Valueという、LLVM IRのオブジェクトでありFunctionやModuleなどを構成するクラスを使います
 Value *NumberAST::codegen() {
     // 64bit整数型のValueを返す
-    return ConstantInt::get(Context, APInt(64, Val, true));
+    return ConstantFP::get(Context, APFloat(Val));
 }
 
 Value *LogErrorV(const char *str) {
@@ -73,31 +73,33 @@ Value *BinaryAST::codegen() {
 
     if (Op == "+") {
         // LLVM IR Builerを使い、この二項演算のIRを作る
-        return Builder.CreateAdd(L, R, "add");
+        return Builder.CreateFAdd(L, R, "float_add");
         // TODO 1.7: '-'と'*'に対してIRを作ってみよう
         // 上の行とhttps://llvm.org/doxygen/classllvm_1_1IRBuilder.htmlを参考のこと
     } else if (Op == "-") {
-        return Builder.CreateSub(L, R, "sub");
+        return Builder.CreateFSub(L, R, "float_sub");
     } else if (Op == "*") {
-        return Builder.CreateMul(L, R, "mul");
+        return Builder.CreateFMul(L, R, "float_mul");
+    } else if (Op == "/") {
+        return Builder.CreateFDiv(L, R, "float_div");
     } else if (Op == "<") {
-        Value *v = Builder.CreateICmp(CmpInst::ICMP_SLT, L, R, "slt");
-        return Builder.CreateIntCast(v, Type::getInt64Ty(Context), false, "cast_i1_to_i64");
+        L = Builder.CreateFCmpULT(L, R, "float_less_than");
+        return Builder.CreateUIToFP(L, Type::getDoubleTy(Context), "bool_to_double");
     } else if (Op == ">") {
-        Value *v = Builder.CreateICmp(CmpInst::ICMP_SGT, L, R, "sgt");
-        return Builder.CreateIntCast(v, Type::getInt64Ty(Context), false, "cast_i1_to_i64");
+        L = Builder.CreateFCmpUGT(L, R, "float_greater_than");
+        return Builder.CreateUIToFP(L, Type::getDoubleTy(Context), "bool_to_double");
     } else if (Op == "<=") {
-        Value *v = Builder.CreateICmp(CmpInst::ICMP_SLE, L, R, "sle");
-        return Builder.CreateIntCast(v, Type::getInt64Ty(Context), false, "cast_i1_to_i64");
+        L = Builder.CreateFCmpULE(L, R, "float_equal_or_less_than");
+        return Builder.CreateUIToFP(L, Type::getDoubleTy(Context), "bool_to_double");
     } else if (Op == ">=") {
-        Value *v = Builder.CreateICmp(CmpInst::ICMP_SGE, L, R, "sge");
-        return Builder.CreateIntCast(v, Type::getInt64Ty(Context), false, "cast_i1_to_i64");
+        L = Builder.CreateFCmpUGE(L, R, "float_equal_or_greater_than");
+        return Builder.CreateUIToFP(L, Type::getDoubleTy(Context), "bool_to_double");
     } else if (Op == "==") {
-        Value *v = Builder.CreateICmp(CmpInst::ICMP_EQ, L, R, "eq");
-        return Builder.CreateIntCast(v, Type::getInt64Ty(Context), false, "cast_i1_to_i64");
+        L = Builder.CreateFCmpUEQ(L, R, "float_equal");
+        return Builder.CreateUIToFP(L, Type::getDoubleTy(Context), "bool_to_double");
     } else if (Op == "!=") {
-        Value *v = Builder.CreateICmp(CmpInst::ICMP_NE, L, R, "ne");
-        return Builder.CreateIntCast(v, Type::getInt64Ty(Context), false, "cast_i1_to_i64");
+        L = Builder.CreateFCmpUNE(L, R, "float_not_equal");
+        return Builder.CreateUIToFP(L, Type::getDoubleTy(Context), "bool_to_double");
     } else {
         return LogErrorV("invalid binary operator");
     }
@@ -112,10 +114,10 @@ Value *BinaryAST::codegen() {
 }
 
 Function *PrototypeAST::codegen() {
-    // MC言語では変数の型も関数の返り値もintの為、関数の返り値をInt64にする。
-    std::vector<Type *> prototype(args.size(), Type::getInt64Ty(Context));
+    // MC言語では変数の型も関数の返り値もdoubleの為、関数の返り値をdoubleにする。
+    std::vector<Type *> prototype(args.size(), Type::getDoubleTy(Context));
     FunctionType *FT =
-        FunctionType::get(Type::getInt64Ty(Context), prototype, false);
+        FunctionType::get(Type::getDoubleTy(Context), prototype, false);
     // https://llvm.org/doxygen/classllvm_1_1Function.html
     // llvm::Functionは関数のIRを表現するクラス
     Function *F =
@@ -175,8 +177,8 @@ Value *IfExprAST::codegen() {
 
     // CondVはint64でtrueなら0以外、falseなら0が入っているため、CreateICmpNEを用いて
     // CondVが0(false)とnot-equalかどうか判定し、CondVをbool型にする。
-    CondV = Builder.CreateICmpNE(
-            CondV, ConstantInt::get(Context, APInt(64, 0)), "ifcond");
+    CondV = Builder.CreateFCmpUNE(
+            CondV, ConstantFP::get(Context, APFloat(0.0)), "ifcond");
     // if文を呼んでいる関数の名前
     Function *ParentFunc = Builder.GetInsertBlock()->getParent();
 
@@ -225,7 +227,7 @@ Value *IfExprAST::codegen() {
     // 値を上書きすることが出来ません。従って、このように実行時にコントロールフローの
     // 値を選択する機能が必要です。
     PHINode *PN =
-        Builder.CreatePHI(Type::getInt64Ty(Context), 2, "iftmp");
+        Builder.CreatePHI(Type::getDoubleTy(Context), 2, "iftmp");
 
     PN->addIncoming(ThenV, ThenBB);
     // TODO 3.4:を実装したらコメントアウトを外して下さい。
