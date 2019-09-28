@@ -1,2 +1,5 @@
-def typetest(double x, int y) : double
-  x + y
+def int ids (int x)
+  x
+
+def double typetest(double x, int y)
+  x + ids(y)

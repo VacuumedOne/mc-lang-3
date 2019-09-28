@@ -1,10 +1,15 @@
-def f1 (int x, int y) : int
-  5 / 2
-def f2 (int x, double y) : double
-  0.0 + 0
-def f3 (double x, int y) : double
-  0.0 + 1
-def f4 (double x, double y) : double
-  0.0 + 2
-def f5 () : double
-  0.0 + 3
+# 型エラーを出すサンプル
+
+def int f1 (int x, int y)          # OK
+  x + y
+def double f2 (int x, double y)    # NG
+  x + y
+def double f3 (double x, int y)    # NG
+  x + y
+def double f4 (double x, double y) # OK
+  x + y
+
+def double f5 (int x, int y)       # NG
+  x + y
+def int f6 (double x, double y)    # NG
+  x + y

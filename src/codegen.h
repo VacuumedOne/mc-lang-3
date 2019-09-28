@@ -110,7 +110,7 @@ Value *CallExprAST::codegen() {
         NumType argType = ArgList[i]->checkType(); //実際に呼び出しで指定された値の型
         if (defType != argType) {
             //型が一致しない場合
-            return LogErrorV("cannot assign the value to function");
+            return LogErrorV("cannot assign the value to this function");
         }
 
         argsV.push_back(argV);
@@ -124,7 +124,6 @@ Value *CallExprAST::codegen() {
 }
 
 NumType CallExprAST::checkType() {
-    LogError("callexprAST");
     Function *CalleeF = myModule->getFunction(callee);
     if (!CalleeF) {
         LogError("Unknown function referenced");
@@ -150,12 +149,12 @@ Value *BinaryAST::codegen() {
     //左右がIntとDoubleで食い違っている場合、Int側にDoubleへのキャストを施す
     //その予定だったけど、キャストがこれじゃダメらしいから断念。
     if (typeL == INT && type == DOUBLE) {
-        return LogErrorV("cannot operate between int and double");
-        L = Builder.CreateFPCast(L, Type::getDoubleTy(Context), "cast_int_to_double");
+        return LogErrorV("cannot operate between 'int' and 'double'");
+        // L = Builder.CreateFPCast(L, Type::getDoubleTy(Context), "cast_int_to_double");
     }
     if (typeR == INT && type == DOUBLE) {
-        return LogErrorV("cannot operate between double and int");
-        R = Builder.CreateFPCast(R, Type::getDoubleTy(Context), "cast_int_to_double");
+        return LogErrorV("cannot operate between 'double' and 'int'");
+        // R = Builder.CreateFPCast(R, Type::getDoubleTy(Context), "cast_int_to_double");
     }
 
     if (type == DOUBLE) {
@@ -272,7 +271,13 @@ Function *FunctionAST::codegen() {
     Builder.SetInsertPoint(BB);
 
     // 関数のbody(ExprASTから継承されたNumberASTかBinaryAST)をcodegenする
-    if (Value *RetVal = body->codegen()) {
+    if (function->getReturnType() != cvtNumTypeToType(body->checkType())) { 
+        //定義された返り値の型と、bodyの型が異なっていたらエラー
+        LogError("illegal definition of function. defined type of return value is different from body type.");
+        return nullptr;
+    }
+    Value *RetVal = body->codegen();
+    if (RetVal) {
         // returnのIRを作る
         Builder.CreateRet(RetVal);
 
@@ -317,12 +322,12 @@ Value *IfExprAST::codegen() {
     // "then"のブロックを作り、その内容(expression)をcodegenする。
     Builder.SetInsertPoint(ThenBB);
     NumType typeT = Then->checkType();
+    if (typeT == INT && type == DOUBLE) {
+        LogErrorV("Cannot convert 'double' to 'int'. Please set same type in THEN value and ELSE value.");
+    }
     Value *ThenV = Then->codegen();
     if (!ThenV)
         return nullptr;
-    if (typeT == INT && type == DOUBLE) {
-        ThenV = Builder.CreateFPCast(ThenV, Type::getDoubleTy(Context), "cast_int_to_double");
-    }
     // "then"のブロックから出る時は"ifcont"ブロックに飛ぶ。
     Builder.CreateBr(MergeBB);
     // ThenBBをアップデートする。
@@ -334,12 +339,12 @@ Value *IfExprAST::codegen() {
     ParentFunc->getBasicBlockList().push_back(ElseBB);
     Builder.SetInsertPoint(ElseBB);
     NumType typeE = Else->checkType();
+    if (typeE == INT && type == DOUBLE) {
+        LogErrorV("Cannot convert 'double' to 'int'. Please set same type in THEN value and ELSE value.");
+    }
     Value *ElseV = Else->codegen();
     if (!ElseV)
         return nullptr;
-    if (typeE == INT && type == DOUBLE) {
-        ElseV = Builder.CreateFPCast(ElseV, Type::getDoubleTy(Context), "cast_int_to_double");
-    }
     Builder.CreateBr(MergeBB);
     ElseBB = Builder.GetInsertBlock();
 

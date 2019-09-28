@@ -174,7 +174,7 @@ static int GetTokPrecedence() {
 
 // LogError - エラーを表示しnullptrを返してくれるエラーハンドリング関数
 std::unique_ptr<ExprAST> LogError(const char *Str) {
-    fprintf(stderr, "Error: %s\n", Str);
+    fprintf(stderr, "\e[31mError: %s\e[m\n", Str);
     return nullptr;
 }
 
@@ -382,6 +382,16 @@ static std::unique_ptr<PrototypeAST> ParsePrototype() {
     // 2.2とほぼ同じ。CallExprASTではなくPrototypeASTを返し、
     // 引数同士の区切りが','ではなくgetNextToken()を呼ぶと直ぐに
     // CurTokに次の引数(もしくは')')が入るという違いのみ。
+    NumType retType;
+    if (CurTok == tok_int) {
+        retType = INT;
+    } else if (CurTok == tok_double) {
+        retType = DOUBLE;
+    } else {
+        return LogErrorP("Expected type of return value");
+    }
+    getNextToken();
+
     if (CurTok != tok_identifier)
         return LogErrorP("Expected function name in prototype");
 
@@ -414,18 +424,7 @@ static std::unique_ptr<PrototypeAST> ParsePrototype() {
     if (CurTok != ')')
         return LogErrorP("Expected ')' in prototype");
     getNextToken();
-    if (CurTok != ':')
-        return LogErrorP("Expected ':' in prototype");
-    getNextToken();
-    NumType retType;
-    if (CurTok == tok_int) {
-        retType = INT;
-    } else if (CurTok == tok_double) {
-        retType = DOUBLE;
-    } else {
-        return LogErrorP("Expected type of return value");
-    }
-    getNextToken();
+    
 
     return llvm::make_unique<PrototypeAST>(FnName, std::move(ArgList), retType);
 }
